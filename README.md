@@ -66,4 +66,4 @@
 2. Перемещение самой карточки (поворот делать не нужно)
 3. Можете также не обрабатывать ситуацию, связанную с выносом элемента за пределы доски
 
-[![Netology AHJ](https://github.com/danroman-github/ahj-forms/actions/workflows/web.yml/badge.svg)](https://github.com/danroman-github/ahj-forms/actions/workflows/web.yml)
+[![ahj-dnd](https://github.com/danroman-github/ahj-dnd/actions/workflows/web.yml/badge.svg)](https://github.com/danroman-github/ahj-dnd/actions/workflows/web.yml)
