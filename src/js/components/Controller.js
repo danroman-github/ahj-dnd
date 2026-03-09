@@ -1,94 +1,369 @@
-import { Control } from "./Control";
-import { Content } from "./Content";
+import Content from "./Content";
+import Controll from "./Controll";
+import LanguageSwitcher from "./LanguageSwitcher";
+import translations from "./Translations";
 
-export class Controller {
-    constructor(container) {
-        this.container = container;
-        this.control = null;
-        this.content = null;
-        this.button = null;
+/**
+ * Класс Controller
+ * Управляет состоянием, обрабатывает события Drag & Drop
+ */
+export default class Controller {
+    constructor(root) {
+        this.root = root;
+        this.currentLang = localStorage.getItem("trelloLanguage") || "en";
+        this.t = translations[this.currentLang];
+
+        /**
+         * Структура данных доски
+         * columns - массив колонок с фиксированными ID и названиями
+         * cards - массив текстов карточек в каждой колонке
+         */
+        this.columns = [
+            { id: "todo", title: this.t.columns.todo, cards: [] },
+            { id: "in-progress", title: this.t.columns.inProgress, cards: [] },
+            { id: "done", title: this.t.columns.done, cards: [] },
+        ];
+
+        this.isDragging = false;
+        this.draggedCard = null;
+        this.draggedElement = null;
+        this.dragClone = null;
+        this.dragOffset = { x: 0, y: 0 };
+        this.placeholder = null;
+        this.sourceColumnIndex = null;
+        this.sourceCardIndex = null;
+
+        this.content = new Content(this);
+        this.controll = new Controll(this);
+        this.languageSwitcher = new LanguageSwitcher(this);
+
+        this.handleMouseMove = this.handleMouseMove.bind(this);
+        this.handleMouseUp = this.handleMouseUp.bind(this);
+    }
+
+    init() {
+        this.loadFromStorage();
+        this.render();
+    }
+
+    /**
+     * Установка языка
+     * @param {string} lang - код языка ('en' или 'ru')
+     */
+    setLanguage(lang) {
+        this.currentLang = lang;
+        this.t = translations[lang];
+
+        this.columns[0].title = this.t.columns.todo;
+        this.columns[1].title = this.t.columns.inProgress;
+        this.columns[2].title = this.t.columns.done;
+
+        localStorage.setItem("trelloLanguage", lang);
+    }
+
+    // Загрузка состояния из localStorage
+    loadFromStorage() {
+        const saved = localStorage.getItem("trelloBoard");
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                if (parsed.columns) {
+                    this.columns[0].cards = parsed.columns[0]?.cards || [];
+                    this.columns[1].cards = parsed.columns[1]?.cards || [];
+                    this.columns[2].cards = parsed.columns[2]?.cards || [];
+                }
+            } catch (e) {
+                console.error("Failed to load from storage", e);
+            }
+        }
+    }
+
+    // Сохранение состояния в localStorage
+    saveToStorage() {
+        localStorage.setItem(
+            "trelloBoard",
+            JSON.stringify({
+                columns: this.columns.map((col) => ({
+                    id: col.id,
+                    cards: col.cards,
+                })),
+            }),
+        );
     }
 
     render() {
-        this.control = new Control();
-        this.control.createInput();
-        this.container.append(this.control.boxInput);
+        this.root.innerHTML = "";
 
-        this.control.createButton();
-        this.container.append(this.control.box);
+        const topBar = document.createElement("div");
+        topBar.className = "top-bar";
+        topBar.appendChild(this.languageSwitcher.createSwitcher());
+        this.root.appendChild(topBar);
 
-        this.content = new Content();
-        this.content.render();
+        const boardElement = this.content.createBoard();
+        this.root.appendChild(boardElement);
 
-        this.button = this.control.box;
+        this.columns.forEach((column, columnIndex) => {
+            const columnElement = this.content.createColumnElement(
+                column,
+                columnIndex,
+            );
+            boardElement
+                .querySelector(".board__columns")
+                .appendChild(columnElement);
 
-        this.content.box.style.position = "absolute";
-        this.content.box.style.display = "none";
+            const addCardControl =
+                this.controll.createAddCardControl(columnIndex);
+            columnElement.appendChild(addCardControl);
+        });
 
-        this.container.append(this.content.box);
+        this.initCardEventListeners();
     }
 
-    start() {
-        this.control.listener(this.btnClick.bind(this));
-        document.addEventListener("click", this.outsideClick.bind(this));
+    // Инициализация обработчиков событий для карточек
+    initCardEventListeners() {
+        document.querySelectorAll(".card").forEach((card) => {
+            card.setAttribute("draggable", "false");
+            card.addEventListener("mousedown", this.handleMouseDown.bind(this));
+
+            card.addEventListener("mouseenter", () => {
+                if (!this.isDragging) {
+                    card.style.cursor = "grab";
+                }
+            });
+
+            card.addEventListener("mouseleave", () => {
+                if (!this.isDragging) {
+                    card.style.cursor = "default";
+                }
+            });
+        });
     }
 
-    btnClick(event) {
-        event.preventDefault();
+    /**
+     * Обработчик нажатия мыши на карточку
+     * @param {MouseEvent} e - событие мыши
+     */
+    handleMouseDown(e) {
+        if (e.target.closest(".card__delete")) return;
 
-        if (this.checkContent()) {
-            this.content.box.style.display = "none";
+        const card = e.currentTarget;
+
+        this.sourceColumnIndex = parseInt(card.dataset.columnIndex);
+        this.sourceCardIndex = parseInt(card.dataset.cardIndex);
+        this.draggedCard = {
+            columnIndex: this.sourceColumnIndex,
+            cardIndex: this.sourceCardIndex,
+            text: card.dataset.cardText,
+        };
+
+        const rect = card.getBoundingClientRect();
+        this.dragOffset = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+        };
+
+        this.dragClone = card.cloneNode(true);
+        this.dragClone.classList.add("drag-clone");
+        this.dragClone.style.position = "fixed";
+        this.dragClone.style.left = e.clientX - this.dragOffset.x + "px";
+        this.dragClone.style.top = e.clientY - this.dragOffset.y + "px";
+        this.dragClone.style.width = rect.width + "px";
+        this.dragClone.style.pointerEvents = "none";
+        this.dragClone.style.zIndex = "9999";
+        this.dragClone.style.cursor = "grabbing";
+
+        const deleteBtn = this.dragClone.querySelector(".card__delete");
+        if (deleteBtn) deleteBtn.style.display = "none";
+
+        document.body.appendChild(this.dragClone);
+
+        this.placeholder = document.createElement("div");
+        this.placeholder.className = "placeholder";
+
+        card.classList.add("dragging");
+
+        this.isDragging = true;
+
+        document.body.style.cursor = "grabbing";
+
+        document.addEventListener("mousemove", this.handleMouseMove);
+        document.addEventListener("mouseup", this.handleMouseUp);
+
+        e.preventDefault();
+    }
+
+    /**
+     * Обработчик движения мыши
+     * @param {MouseEvent} e - событие мыши
+     */
+    handleMouseMove(e) {
+        if (!this.isDragging || !this.dragClone) return;
+
+        this.dragClone.style.left = e.clientX - this.dragOffset.x + "px";
+        this.dragClone.style.top = e.clientY - this.dragOffset.y + "px";
+
+        const elementsUnderCursor = document.elementsFromPoint(
+            e.clientX,
+            e.clientY,
+        );
+        const columnContainer = elementsUnderCursor.find((el) =>
+            el.classList.contains("column__cards"),
+        );
+
+        document.querySelectorAll(".column__cards").forEach((col) => {
+            col.classList.remove("column__cards--dragover");
+        });
+
+        if (columnContainer) {
+            columnContainer.classList.add("column__cards--dragover");
+            this.updatePlaceholderPosition(columnContainer, e.clientY);
         } else {
-            this.position();
-            this.content.box.style.display = "block";
+            this.removePlaceholder();
         }
     }
 
-    outsideClick(event) {
-        if (!this.button.contains(event.target)) {
-            this.content.box.style.display = "none";
+    /**
+     * Обновление позиции Placeholder
+     * @param {HTMLElement} container - контейнер колонки
+     * @param {number} mouseY - координата Y курсора
+     */
+    updatePlaceholderPosition(container, mouseY) {
+        const cards = Array.from(
+            container.querySelectorAll(".card:not(.dragging)"),
+        );
+
+        if (this.placeholder && this.placeholder.parentNode) {
+            this.placeholder.parentNode.removeChild(this.placeholder);
+        }
+
+        if (cards.length === 0) {
+            container.appendChild(this.placeholder);
+            return;
+        }
+
+        let insertBefore = null;
+
+        for (const card of cards) {
+            const rect = card.getBoundingClientRect();
+            const cardMiddle = rect.top + rect.height / 2;
+
+            if (mouseY < cardMiddle) {
+                insertBefore = card;
+                break;
+            }
+        }
+
+        if (insertBefore) {
+            container.insertBefore(this.placeholder, insertBefore);
+        } else {
+            container.appendChild(this.placeholder);
         }
     }
 
-    checkContent() {
-        return this.content.box.style.display === "block";
+    /**
+     * Обработчик отпускания мыши
+     * @param {MouseEvent} e - событие мыши
+     */
+    handleMouseUp(e) {
+        if (!this.isDragging) return;
+
+        if (this.dragClone) {
+            document.body.removeChild(this.dragClone);
+            this.dragClone = null;
+        }
+
+        const elementsUnderCursor = document.elementsFromPoint(
+            e.clientX,
+            e.clientY,
+        );
+        const targetContainer = elementsUnderCursor.find((el) =>
+            el.classList.contains("column__cards"),
+        );
+
+        if (targetContainer && this.draggedCard) {
+            const targetColumnIndex = parseInt(
+                targetContainer.dataset.columnIndex,
+            );
+            let dropIndex = this.columns[targetColumnIndex].cards.length;
+
+            if (
+                this.placeholder &&
+                this.placeholder.parentNode === targetContainer
+            ) {
+                const cards = Array.from(
+                    targetContainer.querySelectorAll(".card:not(.dragging)"),
+                );
+
+                for (let i = 0; i < cards.length; i++) {
+                    if (cards[i] === this.placeholder.nextSibling) {
+                        dropIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            const [movedCard] = this.columns[
+                this.sourceColumnIndex
+            ].cards.splice(this.sourceCardIndex, 1);
+            this.columns[targetColumnIndex].cards.splice(
+                dropIndex,
+                0,
+                movedCard,
+            );
+            this.saveToStorage();
+        }
+
+        document.querySelectorAll(".column__cards").forEach((col) => {
+            col.classList.remove("column__cards--dragover");
+        });
+
+        this.removePlaceholder();
+
+        document.querySelectorAll(".card.dragging").forEach((card) => {
+            card.classList.remove("dragging");
+        });
+
+        this.isDragging = false;
+        this.draggedCard = null;
+        this.draggedElement = null;
+        this.sourceColumnIndex = null;
+        this.sourceCardIndex = null;
+
+        document.body.style.cursor = "default";
+        document.removeEventListener("mousemove", this.handleMouseMove);
+        document.removeEventListener("mouseup", this.handleMouseUp);
+
+        this.render();
     }
 
-    position() {
-        if (!this.button || !this.content) return;
-
-        const buttonRect = this.button.getBoundingClientRect();
-        const containerRect = this.container.getBoundingClientRect();
-
-        const wasHidden = this.container.style.display === "none";
-        if (wasHidden) {
-            this.container.style.display = "block";
+    // Удаление Placeholder
+    removePlaceholder() {
+        if (this.placeholder && this.placeholder.parentNode) {
+            this.placeholder.parentNode.removeChild(this.placeholder);
         }
+    }
 
-        const popoverRect = this.container.getBoundingClientRect();
-        const popoverWidth = popoverRect.width || this.container.offsetWidth;
-        const popoverHeight = popoverRect.height || this.container.offsetHeight;
-
-        const buttonCenterX = buttonRect.left + buttonRect.width / 2;
-        let left = buttonCenterX - popoverWidth / 2;
-
-        const minLeft = containerRect.left;
-        const maxLeft = containerRect.right - popoverWidth;
-
-        if (left < minLeft) {
-            left = minLeft;
-        } else if (left > maxLeft) {
-            left = maxLeft;
+    /**
+     * Добавление новой карточки
+     * @param {number} columnIndex - индекс колонки
+     * @param {string} text - текст карточки
+     */
+    addCard(columnIndex, text) {
+        if (text.trim()) {
+            this.columns[columnIndex].cards.push(text);
+            this.saveToStorage();
+            this.render();
         }
+    }
 
-        let top = buttonRect.top - popoverHeight + 190;
-        console.log(buttonRect.top, popoverHeight);
-
-        const scrollTop = window.scrollY || document.documentElement.scrollTop;
-        const scrollLeft =
-            window.scrollX || document.documentElement.scrollLeft;
-
-        this.content.box.style.top = `${top + scrollTop}px`;
-        this.content.box.style.left = `${left + scrollLeft}px`;
+    /**
+     * Удаление карточки
+     * @param {number} columnIndex - индекс колонки
+     * @param {number} cardIndex - индекс карточки
+     */
+    deleteCard(columnIndex, cardIndex) {
+        this.columns[columnIndex].cards.splice(cardIndex, 1);
+        this.saveToStorage();
+        this.render();
     }
 }

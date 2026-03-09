@@ -1,18 +1,79 @@
-export class Content {
-    constructor() {
-        this.box = null;
+/**
+ * Класс для создания DOM-элементов
+ */
+export default class Content {
+    constructor(controller) {
+        this.controller = controller;
     }
 
-    render() {
-        const text =
-            "And here's some amazing content. It's very engaging. Right?";
+    createBoard() {
+        const board = document.createElement("div");
+        board.className = "board";
 
-        this.box = document.createElement("div");
-        this.box.className = "popover";
-        this.box.innerHTML = `
-            <div class="popover-arrow"></div>
-            <div class="popover-header">Popover title</div>
-            <div class="popover-body">${text}</div>
-        `;
+        const columnsContainer = document.createElement("div");
+        columnsContainer.className = "board__columns";
+
+        board.appendChild(columnsContainer);
+        return board;
+    }
+
+    createColumnElement(column, columnIndex) {
+        const columnDiv = document.createElement("div");
+        columnDiv.className = "column";
+        columnDiv.dataset.columnId = column.id;
+        columnDiv.dataset.columnIndex = columnIndex;
+
+        const title = document.createElement("h2");
+        title.className = "column__title";
+        title.textContent = column.title;
+
+        const cardsContainer = document.createElement("div");
+        cardsContainer.className = "column__cards";
+        cardsContainer.dataset.columnIndex = columnIndex;
+        cardsContainer.dataset.columnId = column.id;
+
+        column.cards.forEach((cardText, cardIndex) => {
+            const card = this.createCardElement(
+                cardText,
+                columnIndex,
+                cardIndex,
+            );
+            cardsContainer.appendChild(card);
+        });
+
+        columnDiv.appendChild(title);
+        columnDiv.appendChild(cardsContainer);
+
+        return columnDiv;
+    }
+
+    createCardElement(text, columnIndex, cardIndex) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.setAttribute("draggable", "false");
+        card.dataset.columnIndex = columnIndex;
+        card.dataset.cardIndex = cardIndex;
+        card.dataset.cardText = text;
+
+        const cardText = document.createElement("div");
+        cardText.className = "card__text";
+        cardText.textContent = text;
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "card__delete";
+        deleteBtn.innerHTML = this.controller.t.controls.deleteButton;
+        deleteBtn.title = this.controller.t.controls.deleteButton;
+        deleteBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (confirm(this.controller.t.messages.confirmDelete)) {
+                this.controller.deleteCard(columnIndex, cardIndex);
+            }
+        });
+
+        card.appendChild(cardText);
+        card.appendChild(deleteBtn);
+
+        return card;
     }
 }
