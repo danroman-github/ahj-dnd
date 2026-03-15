@@ -32,6 +32,8 @@ export default class Content {
         cardsContainer.dataset.columnIndex = columnIndex;
         cardsContainer.dataset.columnId = column.id;
 
+        cardsContainer.setAttribute('aria-label', `Cards in ${column.title} column`);
+
         column.cards.forEach((cardText, cardIndex) => {
             const card = this.createCardElement(
                 cardText,
@@ -54,22 +56,17 @@ export default class Content {
         card.dataset.columnIndex = columnIndex;
         card.dataset.cardIndex = cardIndex;
         card.dataset.cardText = text;
+        card.dataset.cardId = `card-${columnIndex}-${cardIndex}-${Date.now()}`;
 
         const cardText = document.createElement("div");
         cardText.className = "card__text";
         cardText.textContent = text;
 
-        const deleteBtn = document.createElement("button");
-        deleteBtn.className = "card__delete";
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'card__delete';
         deleteBtn.innerHTML = this.controller.t.controls.deleteButton;
         deleteBtn.title = this.controller.t.controls.deleteButton;
-        deleteBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            if (confirm(this.controller.t.messages.confirmDelete)) {
-                this.controller.deleteCard(columnIndex, cardIndex);
-            }
-        });
+        deleteBtn.setAttribute('aria-label', 'Delete card');
 
         card.appendChild(cardText);
         card.appendChild(deleteBtn);

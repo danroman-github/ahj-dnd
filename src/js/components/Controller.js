@@ -32,6 +32,7 @@ export default class Controller {
         this.placeholder = null;
         this.sourceColumnIndex = null;
         this.sourceCardIndex = null;
+        this.draggedCardHeight = 0;
 
         this.content = new Content(this);
         this.controll = new Controll(this);
@@ -39,11 +40,18 @@ export default class Controller {
 
         this.handleMouseMove = this.handleMouseMove.bind(this);
         this.handleMouseUp = this.handleMouseUp.bind(this);
+
+        this.handleMouseMove = this.handleMouseMove.bind(this);
+        this.handleMouseUp = this.handleMouseUp.bind(this);
+        this.handleDocumentDragStart = this.handleDocumentDragStart.bind(this);
+        this.handleDocumentDragOver = this.handleDocumentDragOver.bind(this);
+        this.handleDocumentDrop = this.handleDocumentDrop.bind(this);
     }
 
     init() {
         this.loadFromStorage();
         this.render();
+        this.initEventListeners();
     }
 
     /**
@@ -116,26 +124,21 @@ export default class Controller {
             columnElement.appendChild(addCardControl);
         });
 
-        this.initCardEventListeners();
+        this.initDelegatedEventListeners();
     }
 
-    // Инициализация обработчиков событий для карточек
-    initCardEventListeners() {
-        document.querySelectorAll(".card").forEach((card) => {
-            card.setAttribute("draggable", "false");
-            card.addEventListener("mousedown", this.handleMouseDown.bind(this));
+    // Инициализация обработчиков событий
+    initDelegatedEventListeners() {
+        document.querySelectorAll('.column__cards').forEach(container => {
 
-            card.addEventListener("mouseenter", () => {
-                if (!this.isDragging) {
-                    card.style.cursor = "grab";
-                }
-            });
+            container.addEventListener('dragstart', (e) => e.preventDefault());
+            container.addEventListener('dragover', this.handleDocumentDragOver);
+            container.addEventListener('drop', this.handleDocumentDrop);
+        });
 
-            card.addEventListener("mouseleave", () => {
-                if (!this.isDragging) {
-                    card.style.cursor = "default";
-                }
-            });
+        document.querySelectorAll('.column').forEach(column => {
+            column.addEventListener('click', this.handleCardDelete.bind(this));
+            column.addEventListener('mousedown', this.handleCardDragStart.bind(this));
         });
     }
 
@@ -143,79 +146,99 @@ export default class Controller {
      * Обработчик нажатия мыши на карточку
      * @param {MouseEvent} e - событие мыши
      */
-    handleMouseDown(e) {
-        if (e.target.closest(".card__delete")) return;
+    handleCardDragStart(e) {
+        const card = e.target.closest('.card');
+        if (!card) return;
 
-        const card = e.currentTarget;
+        if (e.target.closest('.card__delete')) return;
 
         this.sourceColumnIndex = parseInt(card.dataset.columnIndex);
         this.sourceCardIndex = parseInt(card.dataset.cardIndex);
         this.draggedCard = {
             columnIndex: this.sourceColumnIndex,
             cardIndex: this.sourceCardIndex,
-            text: card.dataset.cardText,
+            text: card.dataset.cardText
         };
 
         const rect = card.getBoundingClientRect();
+        this.draggedCardHeight = rect.height;
+
         this.dragOffset = {
             x: e.clientX - rect.left,
-            y: e.clientY - rect.top,
+            y: e.clientY - rect.top
         };
 
         this.dragClone = card.cloneNode(true);
-        this.dragClone.classList.add("drag-clone");
-        this.dragClone.style.position = "fixed";
-        this.dragClone.style.left = e.clientX - this.dragOffset.x + "px";
-        this.dragClone.style.top = e.clientY - this.dragOffset.y + "px";
-        this.dragClone.style.width = rect.width + "px";
-        this.dragClone.style.pointerEvents = "none";
-        this.dragClone.style.zIndex = "9999";
-        this.dragClone.style.cursor = "grabbing";
+        this.dragClone.classList.add('drag-clone');
+        this.dragClone.style.position = 'fixed';
+        this.dragClone.style.left = (e.clientX - this.dragOffset.x) + 'px';
+        this.dragClone.style.top = (e.clientY - this.dragOffset.y) + 'px';
+        this.dragClone.style.width = rect.width + 'px';
+        this.dragClone.style.height = rect.height + 'px';
+        this.dragClone.style.pointerEvents = 'none';
+        this.dragClone.style.zIndex = '9999';
+        this.dragClone.style.cursor = 'grabbing';
 
-        const deleteBtn = this.dragClone.querySelector(".card__delete");
-        if (deleteBtn) deleteBtn.style.display = "none";
+        const deleteBtn = this.dragClone.querySelector('.card__delete');
+        if (deleteBtn) deleteBtn.style.display = 'none';
 
         document.body.appendChild(this.dragClone);
 
-        this.placeholder = document.createElement("div");
-        this.placeholder.className = "placeholder";
+        this.placeholder = document.createElement('div');
+        this.placeholder.className = 'placeholder';
+        this.placeholder.style.height = this.draggedCardHeight + 'px';
 
         card.classList.add("dragging");
 
         this.isDragging = true;
+        document.body.classList.add('dragging-active');
 
-        document.body.style.cursor = "grabbing";
-
-        document.addEventListener("mousemove", this.handleMouseMove);
-        document.addEventListener("mouseup", this.handleMouseUp);
+        document.addEventListener('mousemove', this.handleMouseMove);
+        document.addEventListener('mouseup', this.handleMouseUp);
 
         e.preventDefault();
     }
 
     /**
+     * Обработчик удаления карточки (делегированный)
+     * @param {MouseEvent} e 
+     */
+    handleCardDelete(e) {
+        const deleteBtn = e.target.closest('.card__delete');
+        if (!deleteBtn) return;
+
+        const card = deleteBtn.closest('.card');
+        if (!card) return;
+
+        const columnIndex = parseInt(card.dataset.columnIndex);
+        const cardIndex = parseInt(card.dataset.cardIndex);
+
+        if (confirm(this.t.messages.confirmDelete)) {
+            this.deleteCard(columnIndex, cardIndex);
+        }
+    }
+
+    /**
      * Обработчик движения мыши
-     * @param {MouseEvent} e - событие мыши
+     * @param {MouseEvent} e
      */
     handleMouseMove(e) {
         if (!this.isDragging || !this.dragClone) return;
 
-        this.dragClone.style.left = e.clientX - this.dragOffset.x + "px";
-        this.dragClone.style.top = e.clientY - this.dragOffset.y + "px";
+        this.dragClone.style.left = (e.clientX - this.dragOffset.x) + 'px';
+        this.dragClone.style.top = (e.clientY - this.dragOffset.y) + 'px';
 
-        const elementsUnderCursor = document.elementsFromPoint(
-            e.clientX,
-            e.clientY,
-        );
-        const columnContainer = elementsUnderCursor.find((el) =>
-            el.classList.contains("column__cards"),
+        const elementsUnderCursor = document.elementsFromPoint(e.clientX, e.clientY);
+        const columnContainer = elementsUnderCursor.find(el =>
+            el.classList.contains('column__cards')
         );
 
-        document.querySelectorAll(".column__cards").forEach((col) => {
-            col.classList.remove("column__cards--dragover");
+        document.querySelectorAll('.column__cards').forEach(col => {
+            col.classList.remove('column__cards--dragover');
         });
 
         if (columnContainer) {
-            columnContainer.classList.add("column__cards--dragover");
+            columnContainer.classList.add('column__cards--dragover');
             this.updatePlaceholderPosition(columnContainer, e.clientY);
         } else {
             this.removePlaceholder();
@@ -229,12 +252,10 @@ export default class Controller {
      */
     updatePlaceholderPosition(container, mouseY) {
         const cards = Array.from(
-            container.querySelectorAll(".card:not(.dragging)"),
+            container.querySelectorAll(".card:not(.dragging)")
         );
 
-        if (this.placeholder && this.placeholder.parentNode) {
-            this.placeholder.parentNode.removeChild(this.placeholder);
-        }
+        this.removePlaceholder();
 
         if (cards.length === 0) {
             container.appendChild(this.placeholder);
@@ -262,7 +283,7 @@ export default class Controller {
 
     /**
      * Обработчик отпускания мыши
-     * @param {MouseEvent} e - событие мыши
+     * @param {MouseEvent} e
      */
     handleMouseUp(e) {
         if (!this.isDragging) return;
@@ -272,26 +293,19 @@ export default class Controller {
             this.dragClone = null;
         }
 
-        const elementsUnderCursor = document.elementsFromPoint(
-            e.clientX,
-            e.clientY,
-        );
-        const targetContainer = elementsUnderCursor.find((el) =>
-            el.classList.contains("column__cards"),
+        const elementsUnderCursor = document.elementsFromPoint(e.clientX, e.clientY);
+        const targetContainer = elementsUnderCursor.find(el =>
+            el.classList.contains('column__cards')
         );
 
         if (targetContainer && this.draggedCard) {
-            const targetColumnIndex = parseInt(
-                targetContainer.dataset.columnIndex,
-            );
+            const targetColumnIndex = parseInt(targetContainer.dataset.columnIndex);
+
             let dropIndex = this.columns[targetColumnIndex].cards.length;
 
-            if (
-                this.placeholder &&
-                this.placeholder.parentNode === targetContainer
-            ) {
+            if (this.placeholder && this.placeholder.parentNode === targetContainer) {
                 const cards = Array.from(
-                    targetContainer.querySelectorAll(".card:not(.dragging)"),
+                    targetContainer.querySelectorAll('.card:not(.dragging)')
                 );
 
                 for (let i = 0; i < cards.length; i++) {
@@ -302,25 +316,27 @@ export default class Controller {
                 }
             }
 
-            const [movedCard] = this.columns[
-                this.sourceColumnIndex
-            ].cards.splice(this.sourceCardIndex, 1);
-            this.columns[targetColumnIndex].cards.splice(
-                dropIndex,
-                0,
-                movedCard,
-            );
+            const [movedCard] = this.columns[this.sourceColumnIndex]
+                .cards.splice(this.sourceCardIndex, 1);
+            this.columns[targetColumnIndex].cards.splice(dropIndex, 0, movedCard);
+
             this.saveToStorage();
         }
 
-        document.querySelectorAll(".column__cards").forEach((col) => {
-            col.classList.remove("column__cards--dragover");
+        this.cleanupDragUI();
+        this.render();
+    }
+
+    // Очистка UI после перетаскивания
+    cleanupDragUI() {
+        document.querySelectorAll('.column__cards').forEach(col => {
+            col.classList.remove('column__cards--dragover');
         });
 
         this.removePlaceholder();
 
-        document.querySelectorAll(".card.dragging").forEach((card) => {
-            card.classList.remove("dragging");
+        document.querySelectorAll('.card.dragging').forEach(card => {
+            card.classList.remove('dragging');
         });
 
         this.isDragging = false;
@@ -328,12 +344,11 @@ export default class Controller {
         this.draggedElement = null;
         this.sourceColumnIndex = null;
         this.sourceCardIndex = null;
+        this.draggedCardHeight = 0;
 
-        document.body.style.cursor = "default";
-        document.removeEventListener("mousemove", this.handleMouseMove);
-        document.removeEventListener("mouseup", this.handleMouseUp);
-
-        this.render();
+        document.body.classList.remove('dragging-active');
+        document.removeEventListener('mousemove', this.handleMouseMove);
+        document.removeEventListener('mouseup', this.handleMouseUp);
     }
 
     // Удаление Placeholder
@@ -341,6 +356,21 @@ export default class Controller {
         if (this.placeholder && this.placeholder.parentNode) {
             this.placeholder.parentNode.removeChild(this.placeholder);
         }
+    }
+
+    // Обработчик dragstart на документе
+    handleDocumentDragStart(e) {
+        e.preventDefault();
+    }
+
+    // Обработчик dragover на документе
+    handleDocumentDragOver(e) {
+        e.preventDefault();
+    }
+
+    // Обработчик drop на документе
+    handleDocumentDrop(e) {
+        e.preventDefault();
     }
 
     /**
@@ -365,5 +395,12 @@ export default class Controller {
         this.columns[columnIndex].cards.splice(cardIndex, 1);
         this.saveToStorage();
         this.render();
+    }
+
+    // Глобальные обработчики событий
+    initEventListeners() {
+        document.addEventListener('dragstart', this.handleDocumentDragStart);
+        document.addEventListener('dragover', this.handleDocumentDragOver);
+        document.addEventListener('drop', this.handleDocumentDrop);
     }
 }
